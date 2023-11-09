@@ -1,1 +1,2 @@
-# preliminar-mosquito-forecast
+# Mosquito relative abundance forecasting – Preliminary version
+
