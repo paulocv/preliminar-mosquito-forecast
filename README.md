@@ -10,8 +10,38 @@ This repository holds code and a minimally working dataset for the research work
   
 Licensed under [CC BY 4.0 Deed](https://creativecommons.org/licenses/by/4.0/). The data was aggregated by collection dates, to fit the purposes of this work.
 
-# Basic usage guide
+# Code reference
 
-## Prequisites
+## Dependencies
 
-[Placeholder]
+This project was developed with the following software:
+- Python 3.11.5 (with [Conda package manager](https://conda.org/))
+  - Details of the conda environment used for the project can be found in [`conda_env_info/`](conda_env_info/).
+- Apple clang (C compiler). Version 15.0.0 (clang-1500.0.40.1)
+- [Gnu Scientific Library](https://www.gnu.org/software/gsl/) (GSL) – Version 2.7.1
+
+## Historical reproduction number with Monte Carlo Markov Chain (MCMC)
+
+Python script used to preprocess data and run MCMC
+- `study_yearly_rt.py`
+
+This script calls the follwing executable: 
+- `main_mcmc_rt`
+
+built from the C code in [`rtrend_tools/rt_mcmc/Rt.c`](rtrend_tools/rt_mcmc/Rt.c).
+
+Jupyter notebook used to calculate the average historical R(t) over selected seasons.
+- `create_average_rt_ensemble.ipynb`
+
+## Noise patterns – parameter fitting
+- `fit_fixed_noise.ipynb`
+
+## Forecast script for one season
+- `sweep_forecast_dates.py`
+
+Example:
+```sh
+python sweep_forecast_dates.py input_params/wis_optimized/keywest-2016.in outputs/wis-calibrated_fas/keywest/latest/optim/2016/
+```
+
+
