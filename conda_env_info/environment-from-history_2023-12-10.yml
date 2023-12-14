@@ -1,0 +1,17 @@
+name: mosq_forecast
+channels:
+  - defaults
+  - anaconda
+  - conda-forge
+dependencies:
+  - colorama
+  - numpy
+  - scipy
+  - pathos
+  - matplotlib
+  - pandas
+  - pyyaml
+  - numba
+  - ipykernel
+  - openpyxl
+prefix: /Users/pventura/opt/anaconda3/envs/mosq_forecast
