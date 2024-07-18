@@ -26,7 +26,7 @@ from rtrend_tools.forecast_structs import MosqData, ForecastExecutionData, Forec
     ForecastPost, TgData
 from rtrend_tools.preprocessing import DENOISE_CALLABLE, NOISE_CLASS, regularize_negatives_from_denoise
 from rtrend_tools.utils import map_parallel_or_sequential  # , make_dir_from
-from toolbox.file_tools import read_config_file, str_to_bool_safe
+from toolbox.file_tools import read_config_file, str_to_bool_safe, read_file_header
 
 # Directories to store temporary MCMC files
 MCMC_IN_DIR = "mcmc_inputs/sweepdates_in/"
@@ -114,16 +114,22 @@ def import_parse_param_file(args):
 
     # --- Interpolation parameters
     d = interp_params
+    d["interp_method"] = ipd.get("interp_method", "cumulative")  # Also controls the aggregation
+    #      ^ ^ "cumulative", "direct"
     d["rel_smooth_fac"] = float(ipd.get("interp_smooth_fac", 0.01))
     d["spline_degree"] = int(ipd.get("spline_degree", 3))
     d["use_denoised"] = str_to_bool_safe(ipd.get("use_denoised", "False"))
 
     # --- Past R(t) estimation (MCMC) parameters
     d = mcmc_params
+    d["engine"] = ipd.get("mcmc_engine", "c")
     d["nsim"] = int(ipd.get("nsim", 20000))  # Number of simulations (including 10,000 burn-in period)
     d["seed"] = int(ipd.get("mcmc_seed", 20))
     d["sigma"] = float(ipd.get("mcmc_sigma", 0.05))
     d["roi_len_days"] = int(ipd["mcmc_roi_len_days"])
+    d["use_ct_as"] = ipd.get("use_ct_for_estimation", "int")  # Which data from interpolation to pick: int or float
+    d["scaling_factor"] = float(ipd.get("mcmc_scaling_factor", 1.0))
+    d["ct_min_val"] = float(ipd.get("mcmc_ct_min_val", 1.0))  # Clamp c(t) to this value at least (post scaling)
     d["use_tmp"] = str_to_bool_safe(ipd.get("mcmc_use_tmp", "True"))
 
     # --- Future R(t) synthesis parameters
@@ -131,7 +137,6 @@ def import_parse_param_file(args):
     d["method"] = ipd["synth_method"]
     d["tg_method"] = ipd.get("tg_synth_method", "near_past_avg")
     d["seed"] = int(ipd.get("synth_seed", 10))
-
     d["q_low"] = float(ipd.get("q_low", 0.40))
     d["q_hig"] = float(ipd.get("q_hig", 0.60))
     d["ndays_past"] = int(ipd.get("ndays_past", 28))  # Number of days (backwards) to consider in synthesis.
@@ -151,6 +156,8 @@ def import_parse_param_file(args):
     d["num_samples"] = int(ipd.get("rn_num_samples", 1000))
 
     d = recons_params
+    d["use_ct_as"] = ipd.get("use_ct_for_reconstruction", "int")
+    d["tg_is_forward"] = str_to_bool_safe(ipd.get("tg_is_forward", True))
     d["seed"] = int(ipd.get("recons_seed", 30))
 
     # --- Other general parameters (program parameters)
@@ -164,6 +171,7 @@ def import_parse_param_file(args):
     d["tg_data_fname"] = ipd["tg_data_fname"]
     d["apply_scores"] = str_to_bool_safe(ipd.get("apply_scores", "True"))
     d["do_plots"] = str_to_bool_safe(ipd.get("do_plots", False))  # Threaded plot, won't show anyway
+    d["baseline_model_fname"] = ipd.get("baseline_model_fname", "")  # File for baseline. If empty, does'nt calculate relative scores.
     d["ncpus"] = int(ipd.get("ncpus", 1))
     d["tg_max"] = int(ipd["tg_max"])
     d["ct_weekly_max"] = float(ipd.get("ct_weekly_max", np.inf))
@@ -256,6 +264,14 @@ def import_essential_data(params: ParametersBunch):
     # Performance trick: import noise data once
     if "normal_table" in params.preproc["noise_type"]:
         _aux_import_noise_data_with_checks(params.preproc)
+
+    if params.misc["baseline_model_fname"]:
+        fname = params.misc["baseline_model_fname"]
+        header_lines = read_file_header(fname)
+        params.misc["baseline_model_df"] = pd.read_csv(
+            fname, index_col=["day_pres", "weeks_ahead"],
+            skiprows=len(header_lines) + 1, parse_dates=[0]
+        )
 
     return mosq, tg
 
@@ -382,6 +398,7 @@ def callback_interpolation(exd: ForecastExecutionData, fc: ForecastOutput, tg: T
     # Briefing
     # ---------------------------
     exd.method = "STD"
+    # TODO: non-standard method?
     exd.log_current_pipe_step()
 
     # Execution
@@ -389,9 +406,20 @@ def callback_interpolation(exd: ForecastExecutionData, fc: ForecastOutput, tg: T
     # Select between regular or denoised data
     fc.data_weekly = fc.denoised_weekly if exd.interp_params["use_denoised"] else exd.species_series
 
+    # Select interpolation method
+    if exd.interp_params["interp_method"] in ["cumulative"]:
+        exd.cumulative = True
+    elif exd.interp_params["interp_method"] in ["direct"]:
+        exd.cumulative = False
+    else:
+        raise ValueError(f"Invalid interp_method: {exd.interp_params['interp_method']}")
+
     # Run the interpolation
-    fc.t_daily, fc.ct_past, fc.daily_spline, fc.float_data_daily = \
-        interp.weekly_to_daily_spline(fc.t_weekly, fc.data_weekly, return_complete=True, **exd.interp_params)
+    fc.t_daily, fc.ct_past, negative_its, fc.daily_spline, fc.float_data_daily = \
+        interp.weekly_to_daily_spline(
+            fc.t_weekly, fc.data_weekly, return_complete=True, cumulative=exd.cumulative,
+            **exd.interp_params
+        )
 
     # Get more parameters related to the PREPROCESSING ROI.
     fc.past_daily_tlabels = fc.day_0 + pd.TimedeltaIndex(fc.t_daily, "D")
@@ -425,13 +453,33 @@ def callback_r_estimation(exd: ForecastExecutionData, fc: ForecastOutput, tg: Tg
     exd.method = "STD"
     exd.log_current_pipe_step()
 
-    # Execution
-    # ---------------------------
+    # More preprocessing (for MCMC)
+    # -----------------------------
 
     # --- Further crop of preprocess ROI to MCMC ROI
     n = exd.mcmc_params["roi_len_days"]
-    ct_past_crop = fc.ct_past[-n:]
+    if exd.mcmc_params["use_ct_as"] in ["int"]:
+        fc.ct_past_for_mcmc = fc.ct_past[-n:]
+    elif exd.mcmc_params["use_ct_as"] in ["float"]:
+        fc.ct_past_for_mcmc = fc.float_data_daily[-n:]
+    else:
+        raise ValueError(f"Invalid use_ct_as: {exd.mcmc_params['use_ct_as']}")
     tg_df_roi_crop = tg.df_roi.iloc[-n:]
+
+    # --- Applies scaling for MCMC
+    if exd.mcmc_params["scaling_factor"] != 1.0:
+        fc.ct_past_for_mcmc = (fc.ct_past_for_mcmc * exd.mcmc_params["scaling_factor"])
+
+    # --- Clamps to minimum value
+    fc.ct_past_for_mcmc[
+        fc.ct_past_for_mcmc < exd.mcmc_params["ct_min_val"]
+    ] = exd.mcmc_params["ct_min_val"]
+
+    # --- Ensure the data is integer
+    fc.ct_past_for_mcmc = fc.ct_past_for_mcmc.round().astype(int)
+
+    # Execution
+    # ---------
 
     # --- Definition of the temporary files
     if exd.mcmc_params["use_tmp"]:
@@ -454,18 +502,28 @@ def callback_r_estimation(exd: ForecastExecutionData, fc: ForecastOutput, tg: Tg
         fc.rtm = mcmcrt.McmcRtEnsemble(rt_array[:, i_days])  # Do the crop and create RT object
 
     else:
-        # --- MCMC CALL
-        try:
-            fc.rtm = mcmcrt.run_mcmc_rt(
-                ct_past_crop, tg_df_roi_crop, species=exd.species, **exd.mcmc_params)
+        # ---- () ---- C ENGINE
+        if exd.mcmc_params["engine"].lower() in ["c"]:
+            try:
+                # CALL()
+                fc.rtm = mcmcrt.run_mcmc_rt_c(fc.ct_past_for_mcmc, tg_df_roi_crop, species=exd.species, **exd.mcmc_params)
 
-        except mcmcrt.McmcError:
-            exd.stage = "ERROR"  # Send error signal to pipeline
+            except mcmcrt.McmcError:
+                exd.stage = "ERROR"  # Send error signal to pipeline
 
-        finally:
-            if exd.mcmc_params["use_tmp"]:
-                for name in ["in_prefix", "out_prefix", "log_prefix"]:
-                    shutil.rmtree(exd.mcmc_params[name])
+            finally:
+                if exd.mcmc_params["use_tmp"]:
+                    for name in ["in_prefix", "out_prefix", "log_prefix"]:
+                        shutil.rmtree(exd.mcmc_params[name])
+
+        # -------- () ----- NUMBA ENGINE
+        elif exd.mcmc_params["engine"].lower() in ["numba"]:
+            # CALL()
+            exd.mcmc_params["tg_is_forward"] = exd.recons_params["tg_is_forward"]
+            fc.rtm = mcmcrt.run_mcmc_rt_numba(fc.ct_past_for_mcmc, tg_df_roi_crop.values, **exd.mcmc_params)
+
+        else:
+            raise ValueError(f"Unknown MCMC engine: {exd.mcmc_params['engine']}")
 
         if exd.stage == "ERROR":
             return
@@ -555,9 +613,32 @@ def callback_c_reconstruction(exd: ForecastExecutionData, fc: ForecastOutput, tg
     tg.past_2d_array = synth.make_tg_gamma_matrix(tg.df_roi["Shape"].array, tg.df_roi["Rate"].array, tg.max)
     tg.fore_2d_array = synth.make_tg_gamma_matrix(fc.tg_fore_shape, fc.tg_fore_rate, tg.max)
 
+    # Choose the type of past ct time series
+    is_scaled = False
+    if exd.recons_params["use_ct_as"] in ["int"]:
+        # -()- Take the integer time series from preprocessing
+        ct_past = fc.ct_past
+    elif exd.recons_params["use_ct_as"] in ["float"]:
+        # -()- Take the float time series from preprocessing (removes negative entries)
+        ct_past = np.where(fc.float_data_daily >= 0, fc.float_data_daily, 0)
+    elif exd.recons_params["use_ct_as"] in ["mcmc", "from_mcmc"]:
+        # -()- Take the time series used as input to MCMC R(t) estimation. SCALED
+        ct_past = fc.ct_past_for_mcmc
+        is_scaled = True
+    else:
+        raise ValueError(f"Invalid value for `use_ct_for_reconstruction` = {exd.recons_params['use_ct_as']}")
+
     # Reconstruct
-    fc.ct_fore2d = synth.reconstruct_ct_tgtable(fc.ct_past, fc.rt_fore2d, tg, **exd.recons_params)
+    fc.ct_fore2d = synth.reconstruct_ct_tgtable(ct_past, fc.rt_fore2d, tg, **exd.recons_params)
+
+    # Scale back down if needed
+    if is_scaled:
+        fc.ct_fore2d = (fc.ct_fore2d / exd.mcmc_params["scaling_factor"])
+
     fc.ct_fore2d_weekly = interp.daily_to_weekly(fc.ct_fore2d)
+
+    if not exd.cumulative:  # For non-cumulative interpolation, take the mean instead of the sum of all days in the week.
+        fc.ct_fore2d_weekly = (fc.ct_fore2d_weekly / WEEKLEN)
 
     # Incorporate noise uncertainty
     fc.ct_fore2d_weekly = fc.noise_obj.generate(fc.ct_fore2d_weekly)
@@ -598,7 +679,7 @@ def forecast_this_date(date: pd.Timestamp, params: ParametersBunch, mosq: MosqDa
     # PIPELINE LOOP OF STAGES
     # ------------------------------------------------------------------------------------------------------------------
 
-    # Initialize the
+    # Initialize the pipeline variables
     exd.stage, exd.method, exd.notes = PIPE_STAGE[0], "STD", "NONE"
 
     for i_pipe_step in range(MAX_PIPE_STEPS):
@@ -690,7 +771,7 @@ def postprocess_forecast(
     post.ct_past = fc.ct_past
     post.float_data_daily = fc.float_data_daily
 
-    # Noie object
+    # Noise object
     post.noise_obj = fc.noise_obj
 
     # Stats of the past R(t) from MCMC
@@ -728,6 +809,28 @@ def postprocess_forecast(
         )  # Change this indexing to get SHARPNESS and CALIBRATION separately
 
         post.score_rwis = post.score_wis / ground_truth_df.values
+
+        # WIS relative to the preloaded naïve baseline model
+        # TODO: THIS CODE CAN BE IMPROVED AND THEN PUT INTO A FUNCTION
+        if "baseline_model_df" in params.misc:
+            try:
+                xs_df = params.misc["baseline_model_df"].xs(
+                    fc.day_pres, level="day_pres")
+            except KeyError:
+                # Can't find the present date in the baseline data
+                print(
+                    f"WARNING: {fc.day_pres.date().isoformat()} not found"
+                    f" in the baseline df. Relative WIS will won't be calculated.")
+                post.score_baseline_rwis = -np.ones(params.misc["nweeks_fore"], dtype=float)
+            else:
+                if xs_df.shape[0] != params.misc["nweeks_fore"]:
+                    # The size of the baseline data is incompatible
+                    print(
+                        f"WARNING: {fc.day_pres.date().isoformat()} not found"
+                        f" in the baseline df. Relative WIS will won't be calculated.")
+                    post.score_baseline_rwis = -np.ones(params.misc["nweeks_fore"], dtype=float)
+                else:
+                    post.score_baseline_rwis = post.score_wis / xs_df["score_wis"].values
 
         # Quantile coverages
         post.score_alpha = OrderedDict()
@@ -799,6 +902,11 @@ def aggregate_and_export(params: ParametersBunch, args, post_list: list[Forecast
         # Wis divided by observed values.
         scores_rwis = np.concatenate([post.score_rwis for post in post_varray])
         quantiles_df.insert(2, "score_rel_wis", scores_rwis)
+
+        # Relative WIS via baseline model
+        if params.misc["baseline_model_fname"]:
+            scores_baseline_rwis = np.concatenate([post.score_baseline_rwis for post in post_varray])
+            quantiles_df.insert(2, "score_rel_baseline_wis", scores_baseline_rwis)
 
         # Quantile coverages
         for i, alpha in enumerate(["50", "90", "95"]):
