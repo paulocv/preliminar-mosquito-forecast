@@ -1,0 +1,87 @@
+# ROI AND MAIN PARAMETERS
+# -----------------------
+> species = Ae_aegypti
+> truth_data_fname = mosquito_data/by_trapnight/keywest_week.csv
+> tg_data_fname = tg_data/denoised/Key_West-Ae_aegypti_cutoff0p100.csv
+> tg_synth_method = near_past_avg  # last_value, near_past_avg, file_series
+> ncpus = 6
+
+# Forecast for weeks between these dates (doesn't need to be a valid key date)
+> use_dates_first = 2014-05-01
+> use_dates_last =  2014-11-15
+> step_weeks = 1  # Skips weeks if not one
+
+> nweeks_fore = 4
+
+# PREPROCESSING AND INTERPOLATION PARAMETERS
+# ------------------------------------------
+> preproc_method = lowpass  # polyfit, lowpass, rollav, none
+> noise_type = normal_table_zeromean  # normal, normal_fixed, normal_fixed_zeromean, normal_table, normal_table_zeromean, none
+> noise_table_path = noise_data/by_trapnight/keywest/params_2016-2017-2018-2019-2020.csv  # for normal_table
+> noise_coef = 1.0
+> noise_seed = 1000
+> preproc_roi_len = 20  # Length in WEEKS to get denoised. Must be longer than MCMC ROI (in days).
+
+> poly_degree = 3  # For polyfit
+> cutoff = 0.18500  # For lowpass
+> rollav_window = 4  # For rollav
+
+> interp_method = direct  # Use "direct" to interpolate and aggregate from the data itself.
+> interp_smooth_fac = 0.00
+> spline_degree = 3
+
+> use_denoised = True  # Whether to use denoised data through the forecast.
+
+# MCMC ESTIMATION OF R(T)
+# -------------------------
+> mcmc_engine = numba  # c, numba
+> nsim = 20000  # Number of simulations (including 10,000 burn-in period)
+> mcmc_seed = 2000
+> mcmc_sigma = 0.05
+> mcmc_roi_len_days = 49  # MCMC. Must be longer than tg_max.
+> use_ct_for_estimation = float  # Data to use for the MCMC: int or float
+> tg_is_forward = True  # Whether the input TG distributions are forward (for future births). Converted to backw. if so.
+
+> mcmc_scaling_factor = 4.000  #
+> mcmc_use_tmp = True  # Whether to use temporary files with random indexes. Turn off to check logs.
+
+# SYNTHESIS OF FUTURE R(T)
+# ------------------------
+> synth_method = file_as_slope  # static_ramp, linear_reg, file_ens, file_as_slope
+> synth_seed = 3000
+
+# General ramp params
+> q_low = 0.000  # Sorted ensemble: low quantile
+> q_hig = 1.000  # Sorted ensemble: high quantile
+> ndays_past = 7  # Number of days (backwards) to consider in synthesis.
+> r_max = 1000.0  # [high value to prevent clamping] Clamp up to these R values (for the average) 
+
+# Static ramp params
+> k_start = 1.00  # Static Ramp method: starting coefficient
+> k_end = 1.00  # Static Ramp method: ending coefficient
+
+# Dynamic ramp params
+> r1_start = 1.00
+> r2_start = 2.0
+> r1_end = 0.9  # R_new Value to which R = 1 is converted
+> r2_end = 1.5  # R_new Value to which R = 2 is converted
+
+# Rtop ramp params
+> rmean_top = 1.40  # (Obs: Starting value, but it is decreased at each pass, including the first)
+> rtop_max_width = 0.15
+
+# File R(t) ensemble parameters
+> r_fname = mcmc_outputs/bytrapnight_rt/keywest/scale1E2_c0p15_2016-2017-2018-2019-2020/mcmc_avg_rt.out
+
+
+# Reconstruction
+> use_ct_for_reconstruction = mcmc  # Data to use for the c(t) reconstruction
+
+# MISC
+# ----------------------------------
+> recons_seed = 1000  # For the reconstruction of C(t)
+> tg_max = 45  # Maximum nr. of days allowed as generation time
+> apply_scores = True
+> baseline_model_fname = outputs/by-trapnight_out/keywest/latest/naive/2014/fore_quantiles.csv
+> export = True
+> do_plots = False
