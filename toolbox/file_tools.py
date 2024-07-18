@@ -4,11 +4,16 @@ Version: 2.0 - First version to reveive a version number. :p
 """
 import io
 import json
+from collections import OrderedDict, defaultdict
+from pathlib import Path
+
 import numpy as np
 import os
 import sys
 
 from typing import Union, Sequence
+
+import pandas as pd
 
 SEP = os.path.sep  # Alias for the os-dependent path separator
 HEADER_END = "-----\n"
@@ -845,6 +850,42 @@ def read_file_header(filename, header_end=HEADER_END):
     raise EOFError("Hey, I did not find the header ending string on file:\n"
                    "File: '{}'\n"
                    "Ending str:'{}'\n".format(fp.name, header_end))
+
+
+# -------------------------------
+# YAML FUNCTIONALITY
+# -------------------------------
+
+def prepare_dict_for_yaml_export(d: dict):
+    """Converts some data types within a dictionary into other objects
+    that can be read in a file (e.g. strings).
+    Operates recursively through contained dictionaries.
+    Changes are made inplace for all dictionaries.
+    """
+    for key, val in d.items():
+
+        # Ordered and default dict
+        if isinstance(val, (OrderedDict, defaultdict)):
+            d[key] = dict(val)
+
+        # pathlib.Path into its string
+        if isinstance(val, Path):
+            d[key] = str(val.expanduser())
+
+        # Timestamps into string repr.
+        if isinstance(val, pd.Timestamp):
+            d[key] = str(val)
+
+        # Specified iterables
+        if isinstance(
+                val, (tuple, np.ndarray)
+        ):
+            d[key] = list(val)
+
+        # Recurse through inner dictionary
+        if isinstance(val, dict):
+            prepare_dict_for_yaml_export(val)
+
 
 # -------------------------------
 # ZIP/UNZIP FUNCTIONS

@@ -349,6 +349,16 @@ def stdfigsize(scale=1, nrows=1, ncols=1, xtoy_ratio=1.3):
 # ------------------------
 
 
+def rotate_ax_labels(ax, angle=60, xy="x", which="major"):
+    """This function could be included in my plot_tools."""
+    labels = (
+        ax.get_xticklabels(which=which)
+        if xy == "x" else ax.get_yticklabels(which=which))
+
+    for label in labels:
+        label.set(rotation=angle, horizontalalignment='right')
+
+
 def get_available_font_names():
     """Returns a list with fonts currently recognized by matplotlib"""
     return [f.name for f in mpl.font_manager.fontManager.ttflist]
