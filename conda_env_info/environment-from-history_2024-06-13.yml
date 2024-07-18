@@ -1,0 +1,21 @@
+name: mosq_forecast
+channels:
+  - defaults
+  - anaconda
+  - conda-forge
+dependencies:
+  - colorama
+  - numpy
+  - scipy
+  - pathos
+  - matplotlib
+  - pandas
+  - pyyaml
+  - numba
+  - ipykernel
+  - openpyxl
+  - ipywidgets
+  - conda-forge::statsmodels
+  - plotly::plotly
+variables:
+  PYTHONPATH: /Users/pventura/NonCloudStorage/Mosquito_forecast/programs_mosq/
