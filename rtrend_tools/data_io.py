@@ -3,6 +3,8 @@ Import and export files fot the CDC Flu Forecast Challenge
 """
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
+
 import numpy as np
 import os
 import pandas as pd
@@ -30,6 +32,26 @@ def read_yaml_simple(fname: str) -> dict:
         d = yaml.load(fp, yaml.Loader)
     return d
 
+
+def prepare_dict_for_yaml_export(d: dict):
+    """Converts some data types within a dictionary into other objects
+    that can be read in a file (e.g. strings).
+    Operates recursively through contained dictionaries.
+    Changes are made inplace for all dictionaries.
+    """
+    for key, val in d.items():
+
+        # Recurse through inner dictionary
+        if isinstance(val, dict):
+            prepare_dict_for_yaml_export(val)
+
+        # pathlib.Path into its string
+        if isinstance(val, Path):
+            d[key] = str(val.expanduser())
+
+        # Timestamps into string repr.
+        if isinstance(val, pd.Timestamp):
+            d[key] = str(val)
 
 # ---------------------
 
@@ -80,7 +102,7 @@ def week_str_to_weekstart_label(s):
     return get_next_weekstart(datetime(y, 1, 1) + timedelta(weeks=w))
 
 
-def load_mosquito_test_data(fname):
+def load_mosquito_test_data(fname, date_col="Date"):
     """Loads the test mosquito dataset made by Andre."""
 
     mosq = MosqData()
@@ -90,10 +112,10 @@ def load_mosquito_test_data(fname):
 
     # Set the index as the weekstart labels
     mosq.data_time_labels = mosq.df.index = \
-        mosq.df["Date"].apply(week_str_to_weekstart_label, convert_dtype=pd.Timestamp)
+        mosq.df[date_col].apply(week_str_to_weekstart_label, convert_dtype=pd.Timestamp)
 
     # --- Mosquito species data
-    mosq.species_names = [name for name in mosq.df.columns if name not in ["Date", "id", "OID"]]
+    mosq.species_names = [name for name in mosq.df.columns if name not in [date_col, "id", "OID"]]
     mosq.num_species = len(mosq.species_names)
 
     return mosq

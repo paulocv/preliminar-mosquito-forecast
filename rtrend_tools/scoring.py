@@ -600,7 +600,7 @@ def ape_score(observations, point_forecasts):
 
     # Fix zero-observation values
     mask = (observations == 0.)
-    res[mask] = (point_forecasts[mask] == 0)
+    res[mask] = (point_forecasts[mask] == 0).astype(float)
 
     return res
 

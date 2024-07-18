@@ -16,12 +16,15 @@ NEGATIVE_VAL_TOL = -15  # Tolerance for negative values at interpolation.
 # ----------------------------------------------------------------------------------------------------------------------
 
 def weekly_to_daily_spline(t_weekly: np.ndarray, data_weekly: np.ndarray, t_daily=None, rel_smooth_fac=0.01,
-                           spline_degree=3, return_complete=False, **kwargs):
+                           spline_degree=3, return_complete=False, cumulative=True, **kwargs):
     """
     TODO WRITE DOCS
 
     Assumes that each weekly time stamp t represents the past seven days, from t-1 to t-7 (WEEKLEN).
     If not informed, the daily t array is constructed with the hypothesis above.
+
+    If `cumulative` == False, uses a direct spline interpolation on the data.
+    If `cumulative` == True (default), interpolates the cumulative data.
     """
 
     # PREAMBLE
@@ -41,25 +44,36 @@ def weekly_to_daily_spline(t_weekly: np.ndarray, data_weekly: np.ndarray, t_dail
     # EXECUTION
     # -----------------
 
-    # --- Cumulative incidence
-    t_weekly = np.insert(t_weekly, 0, t_weekly[0] - WEEKLEN)  # Extra point to complete the spline
-    data_weekly = np.insert(data_weekly, 0, data_weekly[0])
-    csum = np.cumsum(data_weekly)
+    # ===== Cumulative method
+    if cumulative:
+        # --- Cumulative incidence
+        t_weekly = np.insert(t_weekly, 0, t_weekly[0] - WEEKLEN)  # Extra point to complete the spline
+        data_weekly = np.insert(data_weekly, 0, data_weekly[0])
+        csum = np.cumsum(data_weekly)
 
-    # --- Spline Interpolation
-    spline = UnivariateSpline(t_weekly, csum, s=num_week_points * rel_smooth_fac, k=spline_degree,
-                              ext="const")
-    csum_daily = spline(t_daily)
+        # --- Spline Interpolation
+        spline = UnivariateSpline(t_weekly, csum, s=num_week_points * rel_smooth_fac, k=spline_degree,
+                                  ext="const")
+        csum_daily = spline(t_daily)
 
-    # print(spline.get_coeffs())  # WATCHPOINT
-    # print(csum)
-    # print((t_weekly[1:] - t_weekly[:-1]).argmin())
+        # print(spline.get_coeffs())  # WATCHPOINT
+        # print(csum)
+        # print((t_weekly[1:] - t_weekly[:-1]).argmin())
 
-    # --- Reconstruction of the daily data from cumulative
-    # float_data_daily = np.empty(csum_daily.shape[0] - 1, dtype=float)
-    float_data_daily = np.empty(csum_daily.shape[0], dtype=float)
-    float_data_daily[0] = csum_daily[1] - csum_daily[0]  # Repeat next value for reasonability. Fix later.
-    float_data_daily[1:] = csum_daily[1:] - csum_daily[:-1]  # Has negative values due to "local bellies"
+        # --- Reconstruction of the daily data from cumulative
+        # float_data_daily = np.empty(csum_daily.shape[0] - 1, dtype=float)
+        float_data_daily = np.empty(csum_daily.shape[0], dtype=float)
+        float_data_daily[0] = csum_daily[1] - csum_daily[0]  # Repeat next value for reasonability. Fix later.
+        float_data_daily[1:] = csum_daily[1:] - csum_daily[:-1]  # Has negative values due to "local bellies"
+
+    # ====== Direct method
+    else:
+        spline = UnivariateSpline(
+            t_weekly, data_weekly, s=num_week_points * rel_smooth_fac,
+            k=spline_degree, ext="const",
+        )
+
+        float_data_daily = spline(t_daily)
 
     data_daily = np.round(float_data_daily).astype(int)
 
@@ -84,7 +98,7 @@ def weekly_to_daily_spline(t_weekly: np.ndarray, data_weekly: np.ndarray, t_dail
             pass
 
     if return_complete:
-        return t_daily, data_daily, spline, float_data_daily
+        return t_daily, data_daily, neg_its, spline, float_data_daily
     else:
         # return t_daily, data_daily
         return t_daily, data_daily, neg_its  # TODO: JUST TO DEBUG
@@ -186,7 +200,7 @@ def weekly_to_daily_uniform(t_weekly, data_weekly):
 
 # ----------------------------------------------------------------------------------------------------------------------
 
-def daily_to_weekly(data_daily):
+def daily_to_weekly(data_daily: np.ndarray):
     """
     CURRENTLY: discards last days that do not fit in a new week.
     SIMPLE METHOD: assumes that there are no missing days. That's why it takes only one array as input.
@@ -202,7 +216,7 @@ def daily_to_weekly(data_daily):
 
     # TODO: CHECK SHAPE EQUALITY BETWEEN ARRAYS.
 
-    data_weekly = np.zeros((*data_daily.shape[:-1], num_weeks), int)
+    data_weekly = np.zeros((*data_daily.shape[:-1], num_weeks), dtype=data_daily.dtype)
 
     for i_day, val in enumerate(data_daily.T):
 
@@ -213,3 +227,34 @@ def daily_to_weekly(data_daily):
         data_weekly.T[i_week] += val
 
     return data_weekly
+
+
+# ----------------------------------------------------------------------
+# NEWER FUNCTIONS – OPERATE ON PANDAS DATAFRAMES
+# ----------------------------------------------------------------------
+
+def interp_tseries_via_pandas(
+        aggr_sr: pd.Series, method, freq="1d", **kwargs
+):
+    """Call `pd.Series.interpolate to interpolate temporal data into
+    a constant periodic time signal (using pd.Timestamp as index).
+
+    The time resolution of the interpolation is given as `freq`, which
+    defaults to one day ("1d").
+    Assumes that the input `aggr_sr` is time-sorted!
+
+    As a limitation, this function cannot properly apply methods that
+    "approximately" interpolate the data, as the original data points
+    will always be kept unchanged.
+
+    Remaining keyword arguments (**kwargs) are passed to the
+    pd.Series.interpolate function, which may redirect to the
+    corresponding interpolation function (scipy, numpy).
+    """
+
+    # Daily-frequency date index
+    daily_idx = pd.date_range(aggr_sr.index[0], aggr_sr.index[-1], freq=freq)
+    daily_na_sr = pd.Series(np.nan, index=daily_idx).combine_first(aggr_sr)  # Make a daily series with known values and NaNs
+
+    return daily_na_sr.interpolate(method=method, **kwargs)
+

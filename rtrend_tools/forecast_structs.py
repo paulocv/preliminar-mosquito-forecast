@@ -37,7 +37,7 @@ class TgData:
         self.max = None
 
         self.past_2d_array = None  # Generation time for the ROI | a[i_t, i_s]
-        self.fore_2d_array = None  #
+        self.fore_2d_array = None  # Forecasted generation time  | a[i_t, i_s]
 
 
 class CDCDataBunch:
@@ -81,6 +81,7 @@ class ForecastExecutionData:
         self.synth_params: dict = None
         self.recons_params: dict = None
         # self.ct_cap = None
+        self.cumulative: bool = None  # Whether the interpolation is cumulative
 
         # Pipeline handling
         self.stage = None   # Determines the forecast stage to be run in the next pipeline step. Written at debriefing.
@@ -115,6 +116,7 @@ class ForecastOutput:
         self.ct_past: np.ndarray = None
         self.float_data_daily: np.ndarray = None  # Float data from the spline of the cumulative sum
         self.daily_spline: UnivariateSpline = None
+        self.ct_past_for_mcmc: np.ndarray = None  # Past incidence used for MCMC
 
         # MCMC
         import rtrend_tools.rt_estimation as mcmcrt
@@ -189,6 +191,7 @@ class ForecastPost:
         # Quantile-based
         self.score_wis: np.ndarray = None  # WIS score for known forecasts
         self.score_rwis: np.ndarray = None  # Relative WIS score for known forecasts
+        self.score_baseline_rwis: np.ndarray = None  # Relative WIS with baseline model
         self.score_wis_calib: np.ndarray = None
         self.score_alpha: OrderedDict[np.ndarray] = None
         self.score_sqr: np.ndarray = None  # Simple Quantile Reach: the outermost IQR that misses the observation
@@ -239,6 +242,52 @@ class SweepDatesOutput:
 #         self.day_fore: pd.Timestamp = None  # Last day forecasted
 #         self.fore_daily_tlabels: pd.DatetimeIndex = None  # Daily dates
 #         self.fore_time_labels: pd.DatetimeIndex = None  # Weekly dates for the forecasted series.
+
+
+# Naive Baseline Forecast tools
+# -----------------------------
+
+class BaselForecastExecutionData:
+    """Data bunch to hold infrastructure for the baseline forecast."""
+    past_diff_sr: pd.Series
+    pred_dist: pd.Series
+
+
+class BaselForecastOutput:
+    """Data bunch for the outputs of a single baseline forecast."""
+    day_0: pd.Timestamp  # First day to have report (7 days before the first stamp in ROI)
+    day_pres: pd.Timestamp  # Day of the current report.
+    # ndays_roi: None
+    ndays_fore: None
+    fore_df: pd.DataFrame  # df.loc[i_sample, date_fore]  Forecast trajectories
+
+
+class BaselForecastPost:
+    """Data bunch for postprocessed baseline forecasts."""
+    ground_truth_df: None
+
+    quantile_seq: None
+    num_quantiles: int
+    day_0: pd.Timestamp
+    day_pres: pd.Timestamp  # Day time stamp of present
+    day_fore: pd.Timestamp
+
+    fore_time_labels: pd.DatetimeIndex
+    weekly_quantiles: pd.DataFrame  # df.loc[q_val, date_fore]
+
+    score_wis: np.ndarray  # WIS score for known forecasts
+    score_rwis: np.ndarray  # Relative WIS score for known forecasts
+    score_wis_calib: np.ndarray
+    score_alpha: OrderedDict[np.ndarray]
+    score_sqr: np.ndarray  # Simple Quantile Reach: the outermost IQR that misses the observation
+    # Point
+    score_mae: np.ndarray
+    score_mape: np.ndarray
+    score_smape: np.ndarray
+    score_log: np.ndarray
+
+
+# -----------------------------
 
 
 # Polymorphic class for noise fit'n synth

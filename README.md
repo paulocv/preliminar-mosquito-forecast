@@ -44,4 +44,22 @@ Example:
 python sweep_forecast_dates.py input_params/wis_optimized/keywest-2016.in outputs/wis-calibrated_fas/keywest/latest/optim/2016/
 ```
 
+# Changelog
 
+## 2024-07-18
+
+Updated the repository after the first review round of the manuscript. 
+
+- Included mosquito collection data divided by trap nights (number of 24h-period observations).
+- Made available the aggregated data for the other three study sites: Miami-Dade County, FL, Los Angeles County, CA and Maricopa County, AZ.
+- Implemented a naïve model for comparison with our analytical tool. See `baseline_sweep_dates.py`.
+- Adjusted methodology to accomodate the mosquito data divided by trap night, which consist of smaller non-integer values compared to the absolute number of specimens.
+  - Added upscaling of the data before the MCMC R(t) estimation and the forecast with the renewal equation. Adds also a downscaling back to data per trap night at postprocessing.
+  - After upscaling, numbers are clamped to be at least 1, reducing R(t) instabilities.
+- The optimization process now uses both WIS and coverage metrics, in a two-step procedure (described in the manuscript).
+- Added a revised script for calculating the historic trend of R(t), improving usability and using an optimized [numba](https://numba.pydata.org/) implementation of the MCMC procedure. No changes to the forecast methodology incur from this modification.
+
+
+## 2023-11-08
+
+Initial version, including minimal code and data for running the analytical tool. Created for the submission of the manuscript.

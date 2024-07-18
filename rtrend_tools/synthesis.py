@@ -605,7 +605,7 @@ def _reconstruct_ct_multiple(ct_past, rt_fore_2d, tg_dist, tg_max, ct_fore_2d, n
     return ct_fore_2d
 
 
-def reconstruct_ct_tgtable(ct_past, rt_fore, tg: TgData, ct_fore=None, seed=None, **kwargs):
+def reconstruct_ct_tgtable(ct_past, rt_fore, tg: TgData, ct_fore=None, seed=None, tg_is_forward=True, **kwargs):
     """Reconstructs a time series of cases using a time-dependent generation time distribution, given as 2d arrays."""
 
     # Optional arguments handling
@@ -623,32 +623,53 @@ def reconstruct_ct_tgtable(ct_past, rt_fore, tg: TgData, ct_fore=None, seed=None
 
     # Execution
     # ---------
-    return _reconstruct_ct_tgtable_multiple(ct_past, rt_fore, tg.past_2d_array, tg.fore_2d_array, tg.max, ct_fore,
-                                            num_steps_fore, ndays_roi, seed)
+    return _reconstruct_ct_tgtable_multiple(
+        ct_past, rt_fore, tg.past_2d_array, tg.fore_2d_array, tg.max, ct_fore,
+        num_steps_fore, ndays_roi, tg_is_forward, seed
+    )
 
 
 @nb.njit
 def _reconstruct_ct_tgtable_multiple(
-        ct_past, rt_fore_2d, tg_2d_past, tg_2d_fore, tg_max, ct_fore_2d, num_steps_fore, ndays_roi, seed):
-
+        ct_past, rt_fore_2d, tg_2d_past, tg_2d_fore, tg_max, ct_fore_2d,
+        num_steps_fore, ndays_roi, tg_is_forward, seed
+):
     np.random.seed(seed)  # Seeds the numba or numpy generator
+
+    tg_1d = np.empty(tg_max, dtype=float)  # Allocate the effective generation time
+    tg_1d[0] = 0.
 
     # Main loop over R(t) samples
     for rt_fore, ct_fore in zip(rt_fore_2d, ct_fore_2d):
-
         # Loop over future steps
+
         for i_t_fut in range(num_steps_fore):  # Loop over future steps
+            # Convert generation time to backward
+            if tg_is_forward:
+                # Convert to backward
+                for s in range(1, i_t_fut + 1):
+                    tg_1d[s] = tg_2d_fore[i_t_fut - s, s]
+                for s in range(i_t_fut + 1, tg_max):
+                    tg_1d[s] = tg_2d_past[-(s - i_t_fut), s]
+                # Renormalize
+                tg_1d[:] /= tg_1d.sum()
+            else:
+                # Assume backwards, use tg future only. Assume it's normalized.
+                tg_1d[1:] = tg_2d_fore[i_t_fut, 1:]
+
             lamb = 0.  # Sum of generated cases from past cases
             # r_curr = rt_fore.iloc[i_t_fut]  # Pandas
             r_curr = rt_fore[i_t_fut]
 
             # Future series chunk
             for st in range(1, i_t_fut + 1):
-                lamb += r_curr * tg_2d_fore[i_t_fut - st, st] * ct_fore[i_t_fut - st]
+                # lamb += r_curr * tg_2d_fore[i_t_fut - st, st] * ct_fore[i_t_fut - st]
+                lamb += r_curr * tg_1d[st] * ct_fore[i_t_fut - st]
 
             # Past series chunk
             for st in range(i_t_fut + 1, tg_max):
-                lamb += r_curr * tg_2d_past[-(st - i_t_fut), st] * ct_past[-(st - i_t_fut)]
+                # lamb += r_curr * tg_2d_past[-(st - i_t_fut), st] * ct_past[-(st - i_t_fut)]
+                lamb += r_curr * tg_1d[st] * ct_past[-(st - i_t_fut)]
 
             # Poisson number
             # NOTE: a negative or unreasonable value here may be a day_pres w/out enough past data.

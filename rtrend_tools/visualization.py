@@ -19,7 +19,7 @@ from rtrend_tools.forecast_structs import ForecastPost, MosqData, TgData
 from rtrend_tools.utils import map_parallel_or_sequential
 from toolbox.plot_tools import make_axes_seq, get_color_cycle_list
 
-plt.switch_backend("Agg")  # Prevents on Mac: "NSWindow drag regions should only be invalidated on the Main Thread!"
+# plt.switch_backend("Agg")  # Prevents on Mac: "NSWindow drag regions should only be invalidated on the Main Thread!"
 
 
 # ----------------------------------------------------------------------------------------------------------------------
